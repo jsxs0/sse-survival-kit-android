@@ -178,7 +178,9 @@ class SseClient(
         Request.Builder()
             .url(url)
             .header("Accept", "text/event-stream")
-            .apply { if (lastEventId != null) header("Last-Event-ID", lastEventId) }
+            .apply {
+                if (lastEventId != null) header("Last-Event-ID", lastEventId)
+            }
             .build()
 
     private companion object {

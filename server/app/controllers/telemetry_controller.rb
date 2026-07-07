@@ -38,7 +38,9 @@ class TelemetryController < ApplicationController
         else
           conn.write(EventLog.append(Telemetry.sample))
           tick += 1
-          conn.write("event: heartbeat\ndata: {}\n\n") if (tick % HEARTBEAT_EVERY).zero?
+          if (tick % HEARTBEAT_EVERY).zero?
+            conn.write("event: heartbeat\ndata: {}\n\n")
+          end
         end
 
         sleep 1
