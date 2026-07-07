@@ -29,18 +29,24 @@ class TelemetryController < ApplicationController
         break if conn.closed?
         break if Chaos.kill_epoch != epoch # chaos: severed mid-shift
 
-        case Chaos.mode
-        when :silent
-          # The half-open trap, on demand: socket stays open, nothing arrives.
-        when :burst
-          # The server outpaces the device: 20 events per second.
-          20.times { conn.write(EventLog.append(Telemetry.sample)) }
-        else
-          conn.write(EventLog.append(Telemetry.sample))
-          tick += 1
-          if (tick % HEARTBEAT_EVERY).zero?
-            conn.write("event: heartbeat\ndata: {}\n\n")
+        begin
+          case Chaos.mode
+          when :silent
+            # The half-open trap, on demand: socket stays open, nothing arrives.
+          when :burst
+            # The server outpaces the device: 20 events per second.
+            20.times { conn.write(EventLog.append(Telemetry.sample)) }
+          else
+            conn.write(EventLog.append(Telemetry.sample))
+            tick += 1
+            if (tick % HEARTBEAT_EVERY).zero?
+              conn.write("event: heartbeat\ndata: {}\n\n")
+            end
           end
+        rescue IOError
+          # The client hung up between the closed? check and a write: a normal
+          # end of shift, not an error.
+          break
         end
 
         sleep 1

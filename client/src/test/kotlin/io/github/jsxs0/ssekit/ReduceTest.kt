@@ -70,6 +70,17 @@ class ReduceTest {
     }
 
     @Test
+    fun `a drop echo while already waiting changes nothing`() {
+        // Cancelling a stalled EventSource fires onFailure; the echo must not
+        // escalate the attempt or restart the wait.
+        val wait = SseState.RetryWait(attempt = 2, Disconnect.SilentStall, lastEventId = "41")
+
+        val next = reduce(wait, SseSignal.WentDown(Disconnect.TransportError(null), atMillis = 6_000L))
+
+        assertEquals(wait, next)
+    }
+
+    @Test
     fun `rejected credentials are terminal`() {
         val next = reduce(open, SseSignal.WentDown(Disconnect.AuthRejected(401), atMillis = 5_000L))
 

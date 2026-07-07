@@ -95,7 +95,9 @@ class SseClient(
                 signals.trySend(SseSignal.EventArrived(id))
                 when (type) {
                     HEARTBEAT_TYPE -> Unit // liveness only, not data
-                    RETRY_HINT_TYPE -> data.toLongOrNull()?.let { serverRetryHintMillis = it }
+                    RETRY_HINT_TYPE -> data.toLongOrNull()?.takeIf { it > 0 }?.let { serverRetryHintMillis = it }
+                    // Past the flow's buffer, monitoring semantics say drop;
+                    // pair with latestOnly() or boundedLog() downstream.
                     else -> trySend(ServerEvent(id, type, data))
                 }
             }
@@ -121,42 +123,50 @@ class SseClient(
 
         // Single-consumer pump: all mutation happens here, in one coroutine.
         // OkHttp threads and timers only ever drop signals into the channel.
+        // The pump also owns its teardown, so the last writer to `source` and
+        // `retryTimer` is the coroutine that cleans them up.
         val pump = launch {
-            for (signal in signals) {
-                val next = reduce(_state.value, signal, stableOpenMillis)
-                if (next == _state.value) continue
-                _state.value = next
+            try {
+                for (signal in signals) {
+                    val next = reduce(_state.value, signal, stableOpenMillis)
+                    if (next == _state.value) continue
+                    _state.value = next
 
-                when (next) {
-                    is SseState.Connecting -> {
-                        retryTimer?.cancel()
-                        dial(lastEventId = null)
-                    }
-
-                    is SseState.Resuming -> {
-                        retryTimer?.cancel()
-                        dial(lastEventId = next.lastEventId)
-                    }
-
-                    is SseState.RetryWait -> {
-                        watchdog.stop()
-                        source?.cancel()
-                        retryTimer?.cancel()
-                        retryTimer = launch {
-                            delay(backoff.delayFor(next.attempt, serverRetryHintMillis))
-                            signals.trySend(SseSignal.RetryElapsed)
+                    when (next) {
+                        is SseState.Connecting -> {
+                            retryTimer?.cancel()
+                            dial(lastEventId = null)
                         }
+
+                        is SseState.Resuming -> {
+                            retryTimer?.cancel()
+                            dial(lastEventId = next.lastEventId)
+                        }
+
+                        is SseState.RetryWait -> {
+                            watchdog.stop()
+                            source?.cancel()
+                            retryTimer?.cancel()
+                            retryTimer = launch {
+                                delay(backoff.delayFor(next.attempt, serverRetryHintMillis))
+                                signals.trySend(SseSignal.RetryElapsed)
+                            }
+                        }
+
+                        is SseState.Open -> Unit // data is already flowing
+
+                        is SseState.Failed -> {
+                            val cause = next.cause as Disconnect.AuthRejected
+                            close(SseAuthException(cause.httpCode))
+                        }
+
+                        SseState.Idle -> Unit
                     }
-
-                    is SseState.Open -> Unit // data is already flowing
-
-                    is SseState.Failed -> {
-                        val cause = next.cause as Disconnect.AuthRejected
-                        close(SseAuthException(cause.httpCode))
-                    }
-
-                    SseState.Idle -> Unit
                 }
+            } finally {
+                watchdog.stop()
+                retryTimer?.cancel()
+                source?.cancel()
             }
         }
 
@@ -167,10 +177,9 @@ class SseClient(
         signals.trySend(SseSignal.Start)
 
         awaitClose {
-            watchdog.stop()
-            retryTimer?.cancel()
-            source?.cancel()
             pump.cancel()
+            // Ready for the next collector: the machine parks in Idle.
+            _state.value = SseState.Idle
         }
     }
 

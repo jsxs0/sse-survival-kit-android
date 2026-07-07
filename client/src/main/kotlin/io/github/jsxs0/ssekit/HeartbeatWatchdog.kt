@@ -30,7 +30,11 @@ class HeartbeatWatchdog(
 
     private var patrol: Job? = null
 
+    // onSignal arrives on OkHttp reader threads while stop() runs on the
+    // client's dispatcher; synchronize so a stale patrol can never survive.
+
     /** Any life on the wire resets the countdown: events, heartbeats, the open itself. */
+    @Synchronized
     fun onSignal() {
         patrol?.cancel()
         patrol = scope.launch {
@@ -39,6 +43,7 @@ class HeartbeatWatchdog(
         }
     }
 
+    @Synchronized
     fun stop() {
         patrol?.cancel()
         patrol = null

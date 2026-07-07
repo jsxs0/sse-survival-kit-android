@@ -105,6 +105,9 @@ fun reduce(state: SseState, signal: SseSignal, stableOpenMillis: Long = 60_000L)
         if (state is SseState.Open && signal.id != null) state.copy(lastEventId = signal.id) else state
 
     is SseSignal.WentDown -> when {
+        // Already down (or done): cancelling a stalled source fires onFailure,
+        // and that echo must not escalate the attempt or restart the timer.
+        state is SseState.RetryWait || state is SseState.Failed -> state
         signal.cause is Disconnect.AuthRejected ->
             SseState.Failed(signal.cause)
         state is SseState.Open && signal.atMillis - state.sinceMillis >= stableOpenMillis ->
