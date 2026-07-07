@@ -188,7 +188,8 @@ class SseClient(
             .url(url)
             .header("Accept", "text/event-stream")
             .apply {
-                if (lastEventId != null) header("Last-Event-ID", lastEventId)
+                if (lastEventId != null)
+                    header("Last-Event-ID", lastEventId)
             }
             .build()
 

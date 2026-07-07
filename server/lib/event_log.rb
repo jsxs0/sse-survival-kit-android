@@ -21,7 +21,8 @@ module EventLog
       id = @next_id
       @next_id += 1
 
-      frame = "id: #{id}\nevent: #{event}\ndata: #{payload.to_json}\n\n"
+      frame = "id: #{id}\nevent: #{event}\n" \
+              "data: #{payload.to_json}\n\n"
       @frames << [id, frame]
       @frames.shift while @frames.size > MAX_RETAINED
 
